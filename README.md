@@ -2,7 +2,7 @@
 
 ## Project Goal 🎯
 
-A minimal, non-blocking HTTP/1.1 web server written in C++. Serves static websites and executes CGI scripts. Developed as part of the 42 curriculum with emphasis on correct I/O handling, configurability, and browser compatibility.  
+A minimal, non-blocking HTTP/1.1 web server written in C++98. Serves static websites and executes CGI scripts. Developed as part of the 42 curriculum with emphasis on correct I/O handling, configurability, and browser compatibility.  
 **No external HTTP libraries, no frameworks!**
 
 ---
@@ -103,7 +103,7 @@ server {
 ## Authors 👨‍💻
 
 - lfbl  
-- [add more contributors here]
+- elprofesssoro
 
 ---
 
