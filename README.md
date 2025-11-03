@@ -44,11 +44,8 @@ A minimal, non-blocking HTTP/1.1 web server written in C++98. Serves static webs
 
 ```sh
 make
-./webserv [config/webserv.conf]
+./webserv tester.conf
 ```
-If no config is provided, a default path will be used.
-
----
 
 ## Example Configuration 📝
 
@@ -81,6 +78,7 @@ server {
 
 ## Testing 🧪
 
+- test with http://localhost
 - Example configs & test files are in the repo.
 - Test with standard browsers and tools like `curl`, `ab`, `wrk`, `siege`.
 - Compare behavior and headers with NGINX for reference.
