@@ -1,0 +1,43 @@
+body {
+    background-color: beige;
+	font-family: 'Courier New', Courier, monospace;
+}
+nav {
+	margin-bottom: 20px;
+	background-color: burlywood;
+	padding: 15px 0;
+	border-bottom: 2px solid #ccc;
+}
+h1 {
+	color: darkblue;
+	text-align: center;
+	font-size: 48px;
+	
+}
+ul {
+	list-style-type: none;
+	text-align: center;
+
+}
+li {
+	margin: 10px 0;
+	font-size: 24px;
+	display: inline;
+	padding: 10px 50px;
+}
+
+img {
+	display: block;
+	margin: 20px auto;
+	max-width: 400px;
+	height: auto;
+	border: 2px solid black;
+}
+
+video {
+	display: block;
+	margin: 20px auto;
+	max-width: 600px;
+	height: auto;
+	border: 2px solid black;
+}

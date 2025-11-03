@@ -39,4 +39,5 @@ void Routing::RequestInfo::Initialize()
 			_connection = "";
 			_redirectLocation = "";
 		    _postBody = "";
+			_STATUS_CODES = createStatusCodesMap();
 }

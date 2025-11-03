@@ -34,7 +34,7 @@ std::string envs[][2] =
 	{"filename=", "FILENAME="},
 };
 
-void  processData(std::string input, char **envp, Routing::RequestInfo& reqInfo)
+void  processData(std::string &input, char **envp, Routing::RequestInfo& reqInfo)
 {
 	HttpRequest httprequest;
 	if (envp != NULL)
@@ -83,10 +83,7 @@ void HttpRequest::processInput(std::string input, Routing::RequestInfo& reqInfo)
 			addToEnv(start_pos, input, i, foundPos);
 	}
 	this->envToStruct(reqInfo);
-	if(searchBoundary(reqInfo, input) == 1)
-	{
-		reqInfo._boundary = this->_env[envs[7][1]];
-	}
+	searchBoundary(reqInfo, input);
 	this->envToStruct(reqInfo);
 	std::string path = reqInfo._path;
 	reqInfo._path = URIDecode(path);
@@ -122,9 +119,12 @@ int HttpRequest::takeFirstLine(std::string input)
 		}
 		std::string query;
 		size_t pos = path.find("?");
-		query = path.substr(pos + 1, path.length() - (pos + 1));
-		path = path.substr(0, pos);
-		this->_env[envs[2][1]] = query;
+		if (pos != std::string::npos)
+		{
+			query = path.substr(pos + 1, path.length() - (pos + 1));
+			path = path.substr(0, pos);
+			this->_env[envs[2][1]] = query;
+		}
 	}
 	this->_env[envs[1][1]] = path;
 	this->_env[envs[3][1]] = version;
@@ -151,7 +151,7 @@ void HttpRequest::addToEnv(size_t start_pos, std::string input, int i, size_t fo
 	value.erase(0, value.find_first_not_of(" \t"));
 	value.erase(value.find_last_not_of(" \t\r\n") + 1);
 	
-	if (i == 7)
+	if (i == 4)
 	{
 		size_t semicolon = value.find(';');
 		if (semicolon != std::string::npos)
@@ -184,7 +184,7 @@ void HttpRequest::envToStruct(Routing::RequestInfo& reqInfo)
 	ss >> value;
 	reqInfo._cLength = value;
 	reqInfo._host = this->_env[envs[6][1]];
-	reqInfo._boundary = this->_env[envs[7][1]];
+	// reqInfo._boundary = this->_env[envs[7][1]];
 	reqInfo._httpUserAgent = this->_env[envs[8][1]];
 	reqInfo._connection = this->_env[envs[9][1]];
 }
@@ -229,7 +229,7 @@ void	HttpRequest::skipTillBoundary(std::string input, Routing::RequestInfo& reqI
 	return;
 }
 
-void findConfigs(ServerBlock& config, Routing::RequestInfo& reqInfo)
+void	findConfigs(ServerBlock& config, Routing::RequestInfo& reqInfo)
 {
 	int nb = -1;
 	int matching = 0;
@@ -259,7 +259,7 @@ void findConfigs(ServerBlock& config, Routing::RequestInfo& reqInfo)
 			}
 		}
 	}
-	if (locations[nb].path == "/upload")
+	if (!locations[nb].uploadPath.empty())
 		reqInfo._upload = true;
 	setConfigs(locations[nb], reqInfo);
 	if (locations[nb].bodySize != -1)
@@ -272,7 +272,7 @@ void findConfigs(ServerBlock& config, Routing::RequestInfo& reqInfo)
 	}
 }
 
-void setConfigs(ServerBlock::Location& locations, Routing::RequestInfo& reqInfo)
+void	setConfigs(ServerBlock::Location& locations, Routing::RequestInfo& reqInfo)
 {
 	reqInfo._root = locations.root;
 	reqInfo._cgiEnabled = locations.cgiEnable;
@@ -302,9 +302,12 @@ void setConfigs(ServerBlock::Location& locations, Routing::RequestInfo& reqInfo)
 	{
 		reqInfo._methodsAllowed[i] = locations.methods[i];
 	}
+
 	reqInfo._autoIndex = locations.autoindex;
-	if (reqInfo._autoIndex == 1 && reqInfo._path == "/")
+	if (reqInfo._autoIndex == 1 && *(reqInfo._path.end() - 1) == '/')
+	{
 		reqInfo._useAutoIndex = 1;
+	}
 	if (!locations.defFiles.empty())
 		reqInfo._index = locations.defFiles[0];
 	reqInfo._uploadEnable = locations.uploadEnable;
@@ -326,7 +329,6 @@ void setConfigs(ServerBlock::Location& locations, Routing::RequestInfo& reqInfo)
 	std::getline(ss, pathpart, '/');
 	while (std::getline(ss, pathpart, '/'))
 	{
-		std::cerr << pathpart << std::endl;
 		toCmp += "/" + pathpart;
 		if (locations.path.find(toCmp) != std::string::npos)
 		{
@@ -353,7 +355,6 @@ void setConfigs(ServerBlock::Location& locations, Routing::RequestInfo& reqInfo)
 		path_save = path_save.substr(toCut, path_save.length() - toCut);
 		if (reqInfo._upload)
 		{
-			std::cerr << reqInfo._uploadPath << " " << path_save << std::endl;
 			reqInfo._path = reqInfo._uploadPath + '/' + path_save;
 		}
 		else
@@ -364,87 +365,116 @@ void setConfigs(ServerBlock::Location& locations, Routing::RequestInfo& reqInfo)
 }
 
 
-void setBase(Routing::RequestInfo& reqInfo, ServerBlock& config)
+void	setBase(Routing::RequestInfo& reqInfo, ServerBlock& config)
 {
 	reqInfo._max_body_size = config.GetBodySize();
 }
 
-void handleUpload(Routing::RequestInfo& reqInfo, const char *buffer)
+void	handleUpload(Routing::RequestInfo& reqInfo, const char *buffer)
 {
-
+	size_t totalLength = reqInfo._cLength;
 	if (reqInfo._cLength > reqInfo._max_body_size)
 	{
 		reqInfo._statusCode = 413;
 		return;
 	}
-	std::string input = buffer;
-	if (!reqInfo._boundary.empty())
+	if (reqInfo._cType == "multipart/form-data")
 	{
-		std::string boundary = "--" + reqInfo._boundary;
-		std::string last_boundary = "--" + reqInfo._boundary + "--";
-		size_t pos_next_boundary = input.find(boundary);
-		if (pos_next_boundary == std::string::npos)
+		const char *headerEnd = NULL;
+		for (size_t i = 0; i < totalLength - 3; i++)
 		{
-			reqInfo._statusCode = 87;
+			if (buffer[i] == '\r' && buffer[i+1] == '\n' && 
+				buffer[i+2] == '\r' && buffer[i+3] == '\n')
+			{
+				headerEnd = buffer + i;
+				break;
+			}
+			// totalLength++;
+		}
+		if (headerEnd == NULL)
+		{
+			reqInfo._statusCode = 400;
 			return;
 		}
-		size_t pos_last_boundary = input.find(last_boundary);
-		if (pos_last_boundary == std::string::npos)
-			pos_last_boundary = input.size();
-		while (pos_next_boundary != pos_last_boundary)
+		
+		size_t bodyStart = (headerEnd - buffer) + 4;
+		totalLength += bodyStart;
+		std::string boundary = "--" + reqInfo._boundary;
+		const char *boundaryStr = boundary.c_str();
+		size_t boundaryLen = boundary.length();
+		
+		// Durchsuche BYTES nach Boundary
+		size_t currentPos = bodyStart;
+		while (currentPos < totalLength)
 		{
-			std::string body = input.substr(pos_next_boundary);
-			size_t start = find_body(body, 0);
-			if (start == std::string::npos)
+			// Finde nächste Boundary
+			const char *boundaryPos = NULL;
+			for (size_t i = currentPos; i < totalLength - boundaryLen; i++)
 			{
-				reqInfo._statusCode = 444;
-				return;
-			}
-			std::string header = body.substr(0, start);
-			std::string line;
-			std::istringstream ss(header);
-			while (std::getline(ss, line, ';')) {
-				line.erase(0, line.find_first_not_of(" \t"));
-				size_t sep = line.find('=');
-				if (sep != std::string::npos) {
-					std::string key = line.substr(0, sep);
-					std::string value = line.substr(sep + 1);
-					value.erase(0, value.find_first_not_of("\""));
-					value.erase(value.find_last_of("\""));
-					if (key.find("filename") != std::string::npos)
-						reqInfo._filename = value;
-					else if (key.find("name") != std::string::npos)
-						reqInfo._contentDisposition = value;
+				if (memcmp(buffer + i, boundaryStr, boundaryLen) == 0)
+				{
+					boundaryPos = buffer + i;
+					break;
 				}
 			}
-			body.erase(0, start);
-			size_t end = body.find(boundary);
-			if (end == std::string::npos)
-				end = body.size();
-			body.erase(end);
-			if (reqInfo._filename.empty())
+			
+			if (boundaryPos == NULL)
+				break;
+			size_t partHeaderStart = boundaryPos - buffer + boundaryLen;
+			const char *partHeaderEnd = NULL;
+			for (size_t i = partHeaderStart; i < totalLength - 3; i++)
 			{
-				reqInfo._fields.push_back(body);
+				if (buffer[i] == '\r' && buffer[i+1] == '\n' && 
+					buffer[i+2] == '\r' && buffer[i+3] == '\n')
+				{
+					partHeaderEnd = buffer + i;
+					break;
+				}
 			}
-			else
+			
+			if (partHeaderEnd == NULL)
+				break;
+			std::string partHeader(buffer + partHeaderStart, partHeaderEnd - (buffer + partHeaderStart));
+			std::string filename = "";
+			
+			size_t filenamePos = partHeader.find("filename=\"");
+			if (filenamePos != std::string::npos)
 			{
-				std::string filename = reqInfo._filename;
+				filenamePos += 10;
+				size_t filenameEnd = partHeader.find("\"", filenamePos);
+				filename = partHeader.substr(filenamePos, filenameEnd - filenamePos);
+			}
+			size_t dataStart = (partHeaderEnd - buffer) + 4;
+			size_t dataEnd = dataStart;
+			for (size_t i = dataStart; i < totalLength - boundaryLen - 2; i++)
+			{
+				if (i + 2 + boundaryLen <= totalLength &&
+						buffer[i] == '\r' && buffer[i+1] == '\n' && 
+						memcmp(buffer + i + 2, boundaryStr, boundaryLen) == 0)
+				{
+					dataEnd =  i;
+					break;
+				}
+			}
+			if (dataEnd == dataStart)
+				dataEnd = totalLength;
+			if (!filename.empty())
+			{
 				std::string filepath = reqInfo._uploadPath + "/" + filename;
 				std::ofstream file;
-				file.open(filepath.c_str());
+				file.open(filepath.c_str(), std::ios::out | std::ios::binary);
 				if (!file.is_open())
 				{
 					reqInfo._statusCode = 500;
 					return;
 				}
-				file << body << std::endl;
+				file.write(buffer + dataStart, dataEnd - dataStart);
 				file.close();
+				std::cerr << "Saved file: " << filepath << " (" << (dataEnd - dataStart) << " bytes)" << std::endl;
 			}
-			if (pos_next_boundary == pos_last_boundary)
-				break;
-			pos_next_boundary = input.find(boundary, pos_next_boundary + 3);
-			if (pos_next_boundary == std::string::npos)
-				break;
+			
+			// Nächste Part
+			currentPos = dataEnd + 2 + boundaryLen;
 		}
 	}
 	else
@@ -471,13 +501,13 @@ void handleUpload(Routing::RequestInfo& reqInfo, const char *buffer)
 	reqInfo._statusCode = 201;
 }
 
+
 void deletefile(Routing::RequestInfo& reqInfo)
 {
 	int status = remove(reqInfo._path.c_str());
 	if (status != 0)
 	{
 		reqInfo._statusCode = status;
-		//std::cerr << "Error deleting File" << this->_path.c_str() <<std::endl;
 	} else{
 		std::cout << "204 No Content \r\n" << std::	endl;
 	}

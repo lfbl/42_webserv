@@ -1,0 +1,57 @@
+HTTP/1.1 200 OK
+Content-Type: text/html
+Content-Length: 1338
+Connection: close
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Static Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #333;
+        }
+        .highlight {
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-left: 4px solid #007cba;
+        }
+    </style>
+</head>
+<body>
+    <h1>Static HTML Test Page</h1>
+    <p>Das ist eine statische HTML-Seite zum Testen deines Webservers.</p>
+    
+    <div class="highlight">
+        <p><strong>Info:</strong> Diese Seite wird direkt vom Server gelesen und gesendet - kein CGI nötig!</p>
+    </div>
+    
+    <h2>Test Links</h2>
+    <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="about.html">About</a></li>
+        <li><a href="test.cgi">CGI Test</a></li>
+    </ul>
+    
+    <h2>Statische Inhalte</h2>
+    <p>Diese Seite enthält:</p>
+    <ul>
+        <li>HTML Markup</li>
+        <li>CSS Styling</li>
+        <li>Keine server-seitige Verarbeitung</li>
+    </ul>
+    
+    <footer>
+        <p>Server Test - Static Content</p>
+    </footer>
+</body>
+</html>

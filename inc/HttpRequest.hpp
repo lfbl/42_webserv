@@ -74,7 +74,7 @@ private:
 
 void sendPostData(std::string buffer, int fd);
 void checkRequestValid(Routing::RequestInfo& reqInfo);
-void  processData(std::string input, char **envp, Routing::RequestInfo& reqInfo);
+void  processData(std::string &input, char **envp, Routing::RequestInfo& reqInfo);
 void findConfigs(ServerBlock& config, Routing::RequestInfo& reqInfo);
 void checkPath(Routing::RequestInfo& reqInfo);
 void setConfigs(ServerBlock::Location& locations, Routing::RequestInfo& reqInfo);

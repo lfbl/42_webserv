@@ -8,7 +8,7 @@ INC_DIR		= inc
 # TEMPLATES_DIR = templates
 OBJ_DIR		= objs
 
-SRC_FILES	= main Server CGIHandler HttpRequest Response ConfigParser ServerBlock HttpUtils Routing
+SRC_FILES	= main Server CGIHandler HttpRequest Response ConfigParser ServerBlock HttpUtils Routing init
 
 
 SRCS		= $(addsuffix .cpp, $(addprefix $(SRC_DIR)/, $(SRC_FILES)))

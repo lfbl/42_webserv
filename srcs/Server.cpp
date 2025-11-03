@@ -56,6 +56,7 @@ void Server::setConfigs(std::vector<ServerBlock> &configs)
 void Server::setSockAddrStruct(in_port_t port, std::string ip)
 {
 	struct pollfd serverPollFd;
+	struct sockaddr_in serverAddr;
 
 	serverPollFd.fd = socket(AF_INET, SOCK_STREAM, 0); // AF_INET for IPv4, SOCK_STREAM for TCP,
 	if (serverPollFd.fd < 0)
@@ -82,16 +83,24 @@ void Server::setSockAddrStruct(in_port_t port, std::string ip)
 		close(serverPollFd.fd);
 		exit(EXIT_FAILURE);
 	}
-	if (inet_pton(AF_INET, ip.c_str(), &_serverAddr.sin_addr) <= 0)
+	// if (inet_pton(AF_INET, ip.c_str(), &_serverAddr.sin_addr) <= 0)
+	// {
+	// 	perror("inet_pton");
+	// 	close(serverPollFd.fd);
+	// 	exit(EXIT_FAILURE);
+	// }
+	if (inet_pton(AF_INET, ip.c_str(), &serverAddr.sin_addr) <= 0)
 	{
 		perror("inet_pton");
 		close(serverPollFd.fd);
 		exit(EXIT_FAILURE);
 	}
-	_serverAddr.sin_family = AF_INET;
-	_serverAddr.sin_addr.s_addr = INADDR_ANY; // This means the server will accept connections from any IP address
-	_serverAddr.sin_port = htons(port);
-	if (bind(serverPollFd.fd, (struct sockaddr *)&_serverAddr, sizeof(_serverAddr)) < 0)
+	serverAddr.sin_family = AF_INET;
+	//_serverAddr.sin_family = AF_INET;
+	//_serverAddr.sin_addr.s_addr = INADDR_ANY; // This means the server will accept connections from any IP address
+	//_serverAddr.sin_port = htons(port);
+	serverAddr.sin_port = htons(port);
+	if (bind(serverPollFd.fd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0)
 	{
 		perror("bind");
 		close(serverPollFd.fd);
@@ -149,10 +158,13 @@ void Server::checkAndConnectNewClient()
 			newClientPollFd.events = POLLIN;
 			newClientPollFd.revents = 0;
 			_fds.push_back(newClientPollFd);
-			_requestsMap[newClientPollFd.fd] = "";				 
+			_requestsMap[newClientPollFd.fd] = "";
 			_httpRequestsMap[newClientPollFd.fd] = HttpRequest();
-			_lastActivityMap[newClientPollFd.fd] = time(NULL);	 
+			_lastActivityMap[newClientPollFd.fd] = time(NULL);
 			_clientToServerMap[newClientPollFd.fd] = i;
+
+			_connections[_fds.size() - 1] = Connection(newClientPollFd.fd, _fds.size() - 1);
+			std::cout << "Connection was created: " << _fds.size() - 1 << " PollFd index: " << _fds.size() - 1 << std::endl;
 			std::cout << "\nNew client connected: FD " << newClientPollFd.fd << " to " << inet_ntoa(clientAddr.sin_addr) << ":" << ntohs(clientAddr.sin_port) << std::endl;
 		}
 	}
@@ -167,7 +179,7 @@ void Server::checkClientsForData(char **envp)
 		if (_fds[i].revents & POLLIN)
 		{
 			ssize_t bytes = recv(_fds[i].fd, buffer, sizeof(buffer) - 1, 0);
-			std::cerr << "bytes read" << bytes << std::endl;
+			// std::cerr << "bytes read" << bytes << std::endl;
 			if (bytes <= 0)
 			{
 				if (bytes == 0)
@@ -199,33 +211,92 @@ void Server::checkClientsForData(char **envp)
 				_lastActivityMap[_fds[i].fd] = time(NULL);
 				if (_httpRequestsMap[_fds[i].fd].isComplete())
 				{
+					std::cout << "keepAlive: " << std::endl;
+
 					bool keepAlive = startProcess(envp,
 												  _httpRequestsMap[_fds[i].fd].getDecodedData().c_str(),
-												  _fds[i].fd, initStatusCode);
+												  _fds[i].fd, initStatusCode, i);
 
-					if (keepAlive)
+					if (_fds[i].revents & POLLOUT)
 					{
-						std::cerr << "Keeping connection alive for FD " << _fds[i].fd << std::endl;
-						_requestsMap[_fds[i].fd] = "";				 
-						_httpRequestsMap[_fds[i].fd] = HttpRequest();
-						_lastActivityMap[_fds[i].fd] = time(NULL);
-					}
-					else
-					{
-						std::cerr << "Closing connection for FD " << _fds[i].fd << std::endl;
-						close(_fds[i].fd);
-
-						_requestsMap.erase(_fds[i].fd);
-						_httpRequestsMap.erase(_fds[i].fd);
-						_lastActivityMap.erase(_fds[i].fd);
-						_clientToServerMap.erase(_fds[i].fd);
-						_fds[i] = _fds.back();
-						_fds.pop_back();
-						i--;
-						_pollinNum--;
+						std::cout << "Preparing to send response to FD " << _fds[i].fd << std::endl;
+						_connections[i].keepAlive = keepAlive;
+						//_connections[i].isSending = _isSending[i];
 					}
 				}
 			}
+		}
+		if (_fds[i].revents & POLLOUT)
+		{
+			std::cout << "Sending response to FD " << _fds[i].fd << std::endl;
+
+			Connection &conn = _connections[i];
+			size_t to_send = std::min((size_t)60000, conn.responseBuffer.size() - conn.bytesSent);
+
+			if (to_send > 0)
+			{
+				ssize_t sent = send(_fds[i].fd,
+									conn.responseBuffer.c_str() + conn.bytesSent, // ← FROM bytesSent OFFSET
+									to_send, 0);								  // ← ONLY REMAINING BYTES
+
+				if (sent > 0)
+				{
+					_connections[i].bytesSent += sent;
+					std::cout << "Sent " << sent << " bytes, total sent: " << _connections[i].bytesSent
+							  << "/" << _connections[i].responseBuffer.size() << std::endl;
+				}
+				else if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+				{
+					// Buffer still full, wait for next POLLOUT
+					std::cout << "Send blocked, waiting for next POLLOUT" << std::endl;
+				}
+				else
+				{
+					// Error
+					perror("send failed");
+					// Handle error - close connection
+				}
+			}
+
+			// Check if all data sent
+			if (_connections[i].bytesSent == _connections[i].responseBuffer.size())
+			{
+				std::cout << "Response fully sent to FD " << _fds[i].fd << std::endl;
+				_connections[i].bytesSent = 0;
+				_connections[i].responseBuffer.clear();
+				_connections[i].isSending = false;
+				_fds[i].events &= ~POLLOUT; // Stop monitoring POLLOUT
+				_fds[i].events |= POLLIN;	// Back to reading
+			}
+		}
+
+		if (!_httpRequestsMap[_fds[i].fd].isComplete() || _connections[i].isSending)
+			continue;
+
+		if (_connections[i].keepAlive)
+		{
+			std::cerr << "Keeping connection alive for FD " << _fds[i].fd << std::endl;
+			_requestsMap[_fds[i].fd] = "";
+			_httpRequestsMap[_fds[i].fd] = HttpRequest();
+			_lastActivityMap[_fds[i].fd] = time(NULL);
+			_connections[i].isSending = false;
+			_fds[i].events = POLLIN;
+		}
+		else
+		{
+			std::cerr << "Closing connection for FD " << _fds[i].fd << std::endl;
+			close(_fds[i].fd);
+
+			_requestsMap.erase(_fds[i].fd);
+			_httpRequestsMap.erase(_fds[i].fd);
+			_lastActivityMap.erase(_fds[i].fd);
+			_clientToServerMap.erase(_fds[i].fd);
+			_fds[i].events = POLLIN;
+			_connections.erase(i);
+			_fds[i] = _fds.back();
+			_fds.pop_back();
+			i--;
+			_pollinNum--;
 		}
 	}
 }
@@ -291,10 +362,9 @@ void Server::setConfig(ServerBlock &config)
 	this->_config = config;
 }
 
-bool Server::startProcess(char **envp, const char *buffer, int clientFd, int initStatusCode)
+bool Server::startProcess(char **envp, const char *buffer, int clientFd, int initStatusCode, int i)
 {
 	std::string check = buffer;
-	std::cerr << buffer << std::endl;
 	Routing::RequestInfo reqInfo;
 	reqInfo.Initialize();
 	int id = _clientToServerMap[clientFd];
@@ -309,7 +379,7 @@ bool Server::startProcess(char **envp, const char *buffer, int clientFd, int ini
 		reqInfo._connection = "close";
 	}
 	if (reqInfo._statusCode == 200)
-		processData(buffer, envp, reqInfo);
+		processData(check, envp, reqInfo);
 	if (reqInfo._statusCode == 200)
 		findConfigs(this->_configs[id], reqInfo);
 	if (reqInfo._statusCode == 200)
@@ -326,15 +396,11 @@ bool Server::startProcess(char **envp, const char *buffer, int clientFd, int ini
 	}
 	else
 	{
-		if (reqInfo._upload)
+		if (reqInfo._upload && reqInfo._method == "POST")
 			handleUpload(reqInfo, buffer);
-		if (reqInfo._method == "DELETE")
+		else if (reqInfo._method == "DELETE")
 		{
 			deletefile(reqInfo);
-		}
-		if (reqInfo._statusCode >= 400)
-		{
-			response = sendErrorResponse(reqInfo._statusCode, reqInfo);
 		}
 		else if (reqInfo._useAutoIndex && reqInfo._index.empty())
 		{
@@ -344,8 +410,14 @@ bool Server::startProcess(char **envp, const char *buffer, int clientFd, int ini
 		}
 		else
 		{
-			std::string response_static = executeStatic(reqInfo._path);
+			std::cout << "Executing static for path: " << reqInfo._path << std::endl;
+			std::string response_static = executeStatic(reqInfo._path, reqInfo);
+			// std::cout << "Static resp: " << response_static << std::endl;
 			response = makeResponse(response_static, reqInfo);
+		}
+		if (reqInfo._statusCode >= 400)
+		{
+			response = sendErrorResponse(reqInfo._statusCode, reqInfo);
 		}
 	}
 	if (reqInfo._statusCode >= 400)
@@ -354,16 +426,59 @@ bool Server::startProcess(char **envp, const char *buffer, int clientFd, int ini
 	}
 	if (!reqInfo._useCGI || reqInfo._statusCode >= 400)
 	{
-		send(clientFd, response.c_str(), response.size(), 0);
+		if (response.empty())
+		{
+			response = makeResponse(response, reqInfo);
+		}
+		std::cout << "Response prepared for FD " << clientFd << " with status code " << reqInfo._statusCode << std::endl;
+		// std::cerr << response << std::endl;
+		//  Try to send immediately
+		size_t sent = send(clientFd, response.c_str(), response.size(), 0);
+
+		if (sent == response.size())
+		{
+			// All sent immediately - no need for POLLOUT
+			std::cout << "Response sent immediately to FD " << clientFd << std::endl;
+			_connections[i].isSending = false;
+			_fds[i].events = POLLIN; // Back to reading
+		}
+		else if (sent > 0)
+		{
+			// Partial send - store remaining data for POLLOUT
+			std::cout << "Partial send (" << sent << "/" << response.size() << "), setting POLLOUT" << std::endl;
+			_connections[i].responseBuffer.swap(response);
+			_connections[i].bytesSent = sent;
+			_connections[i].isSending = true;
+			_fds[i].events |= POLLOUT;
+		}
+		else if (sent == 0)
+		{
+			// Send would block - store full response for POLLOUT
+			std::cout << "Send blocked, setting POLLOUT" << std::endl;
+			_connections[i].responseBuffer.swap(response);
+			_connections[i].bytesSent = 0;
+			_connections[i].isSending = true;
+			_fds[i].events |= POLLOUT;
+		}
+		else
+		{
+			// Error
+			perror("Send failed");
+			_connections[i].isSending = false;
+			return (false);
+			// Handle error
+		}
+
+		_connections[i].keepAlive = (reqInfo._connection == "keep-alive");
 	}
-	if (reqInfo._connection != "keep-alive")
+	if (reqInfo._connection != "keep-alive" && !_connections[i].isSending)
 	{
+		std::cout << "Closing connection for FD " << clientFd << std::endl;
 		close(clientFd);
 		return (false);
 	}
 	return (true);
 }
-
 
 void Server::startCGI(Routing::RequestInfo &reqInfo, int clientFd, const char *buffer)
 {

@@ -15,6 +15,7 @@
 
 #include <string>
 #include <vector>
+#include "init.hpp"
 #include "../inc/ServerBlock.hpp"
 class Routing
 {
@@ -62,6 +63,7 @@ class Routing
 			std::vector<std::string>			_customHeaders;
 			std::vector<std::string>			_fields;
 			std::vector<ServerBlock::ErrorPage>	_errorPages;
+			std::map<int, std::string>			_STATUS_CODES;
 		};
 };
 

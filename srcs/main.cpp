@@ -6,7 +6,7 @@
 
 int main(int argc, char **argv, char **envp)
 {
-	if (argc != 2)
+	if (argc != 3)
 	{
 		std::cerr  << "Wrong amount of arguments" << std::endl;
 		exit(1);
@@ -16,7 +16,7 @@ int main(int argc, char **argv, char **envp)
 	std::vector<ServerBlock> serverBlocks;
 	try
 	{
-		serverBlocks = parser.Parse(argv[1]);
+		serverBlocks = parser.Parse(argv[2]);
 	}
 	catch(const ConfigParser::ConfigErrorException& e)
 	{
